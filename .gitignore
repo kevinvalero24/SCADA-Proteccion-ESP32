@@ -1,0 +1,40 @@
+# ==================================================
+# 1. DEPENDENCIAS Y COMPILADOS WEB (Node.js & Angular)
+# ==================================================
+# No subir el abismo infinito de Node
+node_modules/
+
+# No subir las carpetas de compilación final de Angular
+dist/
+out-tsc/
+.angular/
+
+# ==================================================
+# 2. ENTORNO DE HARDWARE (PlatformIO / ESP32)
+# ==================================================
+# Evitar que suban los binarios pesados de C++
+.pio/
+*.bin
+*.elf
+
+# Configuraciones locales del editor
+.vscode/
+
+# ==================================================
+# 3. SEGURIDAD Y CREDENCIALES
+# ==================================================
+# ¡NUNCA subir contraseñas o tokens a internet!
+.env
+.env.*
+*.pem
+
+# ==================================================
+# 4. LOGS Y ARCHIVOS DE SISTEMA OPERATIVO
+# ==================================================
+# Basura de Windows y Mac
+Thumbs.db
+.DS_Store
+
+# Archivos de registro de errores
+*.log
+npm-debug.log*

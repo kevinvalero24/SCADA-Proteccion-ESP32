@@ -1,0 +1,84 @@
+<div class="container text-center mt-5">
+  <h1 class="text-primary fw-bold">Supervisión de Red Eléctrica</h1>
+  <hr>
+
+  <div class="alert alert-warning mx-auto shadow-sm text-start" style="max-width: 800px; border-left: 5px solid #ffc107;" [class.d-none]="!conexionPerdida">
+    <h5 class="alert-heading fw-bold text-dark mb-2">
+      <i class="fa-solid fa-triangle-exclamation text-warning me-2"></i> ¡Telemetría Desconectada!
+    </h5>
+    <p class="mb-2 text-dark"><strong>Esperando conexión del ESP32...</strong> El tablero HMI no recibe datos actualizados desde hace más de 15 segundos.</p>
+    <hr class="border-secondary opacity-25">
+    <p class="mb-0 small text-dark">
+      <strong>Protocolo de Revisión:</strong> Llame a su proveedor de internet (ej. Movistar) para verificar la red. Si le confirman que hay internet en la casa, por favor <strong>llame al técnico de mantenimiento</strong> del tablero.
+    </p>
+  </div>
+  
+  <div class="card shadow-sm mt-4 mx-auto" style="max-width: 400px;" 
+       [class.border-danger]="alarmaActiva && !conexionPerdida" 
+       [class.bg-danger]="alarmaActiva && !conexionPerdida" 
+       [class.text-white]="alarmaActiva && !conexionPerdida"
+       [class.bg-light]="conexionPerdida"
+       [class.opacity-50]="conexionPerdida">
+    <div class="card-body">
+      <h5 class="card-title" [class.text-secondary]="!alarmaActiva || conexionPerdida" [class.text-white]="alarmaActiva && !conexionPerdida">
+        ID Tablero: {{ datoActual?.mac_address || 'Cargando...' }}
+      </h5>
+      
+      <div class="my-4">
+        <p class="mb-0" [class.text-muted]="!alarmaActiva || conexionPerdida">Tensión de Red (V)</p>
+        <h2 class="fw-bold display-4" [class.text-primary]="!alarmaActiva && !conexionPerdida">
+          {{ datoActual?.voltage || '0' }} <span class="fs-4">V</span>
+        </h2>
+      </div>
+      
+      <div class="d-flex justify-content-around mt-4 border-top pt-3" [class.border-light]="alarmaActiva && !conexionPerdida">
+        <div>
+          <p class="mb-0" [class.text-muted]="!alarmaActiva || conexionPerdida">Corriente</p>
+          <h4 class="fw-bold" [class.text-danger]="!alarmaActiva && !conexionPerdida">{{ datoActual?.current || '0' }} A</h4>
+        </div>
+        <div>
+          <p class="mb-0" [class.text-muted]="!alarmaActiva || conexionPerdida">Potencia Activa</p>
+          <h4 class="fw-bold" [class.text-warning]="!alarmaActiva && !conexionPerdida">{{ datoActual?.power || '0' }} W</h4>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mt-4 mx-auto" style="max-width: 800px;" [class.opacity-50]="conexionPerdida">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="card-title text-secondary mb-0">Curva de Demanda (Potencia)</h5>
+        
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="switchFormatoHora" [checked]="esFormato24h" (change)="toggleFormatoHora($event)" [disabled]="conexionPerdida">
+          <label class="form-check-label text-muted small" for="switchFormatoHora">Formato 24h</label>
+        </div>
+      </div>
+      
+      <div style="position: relative; height: 300px; width: 100%;">
+        <canvas #graficaConsumo></canvas> 
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex justify-content-between mt-4 mb-5 mx-auto" style="max-width: 800px;">
+    
+    <button class="btn flex-grow-1 me-2 fw-bold text-white" 
+            [class.btn-success]="!alarmaActiva && !conexionPerdida" 
+            [class.btn-danger]="alarmaActiva && !conexionPerdida"
+            [class.btn-secondary]="conexionPerdida" 
+            style="cursor: default;">
+      <i class="fa-solid" 
+         [class.fa-bolt]="!alarmaActiva && !conexionPerdida" 
+         [class.fa-triangle-exclamation]="alarmaActiva || conexionPerdida"></i> 
+      {{ mensajeAlarma }}
+    </button>
+    
+    <button class="btn btn-outline-primary flex-grow-1 ms-2" (click)="descargarReporte()">
+      <i class="fa-solid fa-download"></i> Descargar Histórico (CSV)
+    </button>
+  </div>
+
+</div>
+
+<router-outlet></router-outlet>

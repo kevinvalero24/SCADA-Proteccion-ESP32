@@ -44,6 +44,74 @@
     </div>
   </div>
 
+  <div class="card shadow-sm mt-4 mx-auto" style="max-width: 800px;" [class.opacity-50]="conexionPerdida || alarmaActiva">
+    
+    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+      <h5 class="mb-0 fw-bold"><i class="fa-solid fa-sliders me-2"></i> Mando de Potencia</h5>
+      <span class="badge fs-6" 
+            [class.text-bg-primary]="estadoMando.modo === 'manual'" 
+            [class.text-bg-info]="estadoMando.modo === 'horario'">
+        Modo: {{estadoMando.modo | uppercase}}
+      </span>
+    </div>
+
+    <div class="card-body bg-light">
+      
+      <div class="d-flex justify-content-center gap-3 mb-3">
+        <button class="btn fw-bold px-4" 
+                [class.btn-primary]="estadoMando.modo === 'manual'" 
+                [class.btn-outline-primary]="estadoMando.modo !== 'manual'" 
+                (click)="cambiarModo('manual')" [disabled]="conexionPerdida || alarmaActiva">
+          <i class="fa-solid fa-hand-pointer me-1"></i> Control Manual
+        </button>
+        <button class="btn fw-bold px-4" 
+                [class.btn-info]="estadoMando.modo === 'horario'" 
+                [class.btn-outline-info]="estadoMando.modo !== 'horario'" 
+                [class.text-white]="estadoMando.modo === 'horario'"
+                (click)="cambiarModo('horario')" [disabled]="conexionPerdida || alarmaActiva">
+          <i class="fa-solid fa-clock me-1"></i> Control Horario
+        </button>
+      </div>
+
+      <hr class="border-secondary opacity-25">
+
+      <div class="text-center py-2" [class.d-none]="estadoMando.modo !== 'manual'">
+        <h6 class="text-muted fw-bold mb-3">Accionamiento Directo del Contactor</h6>
+        <div class="d-flex justify-content-center gap-4">
+          <button class="btn btn-lg fw-bold px-5 py-3 shadow-sm" 
+                  [class.btn-success]="estadoMando.forzar_rele" 
+                  [class.btn-outline-success]="!estadoMando.forzar_rele" 
+                  (click)="enviarComandoManual(true)" [disabled]="conexionPerdida || alarmaActiva">
+            <i class="fa-solid fa-power-off me-2"></i> ENCENDER (ON)
+          </button>
+          <button class="btn btn-lg fw-bold px-5 py-3 shadow-sm" 
+                  [class.btn-danger]="!estadoMando.forzar_rele" 
+                  [class.btn-outline-danger]="estadoMando.forzar_rele" 
+                  (click)="enviarComandoManual(false)" [disabled]="conexionPerdida || alarmaActiva">
+            <i class="fa-solid fa-ban me-2"></i> APAGAR (OFF)
+          </button>
+        </div>
+      </div>
+
+      <div class="row text-center py-2" [class.d-none]="estadoMando.modo !== 'horario'">
+        <h6 class="text-muted fw-bold mb-3">Programación Automática (Temporizador)</h6>
+        <div class="col-6">
+          <label class="form-label fw-bold text-success">Hora de Encendido</label>
+          <input type="time" class="form-control text-center fs-5 shadow-sm" 
+                 [value]="estadoMando.hora_inicio" (change)="actualizarHorario('inicio', $event)" 
+                 [disabled]="conexionPerdida || alarmaActiva">
+        </div>
+        <div class="col-6">
+          <label class="form-label fw-bold text-danger">Hora de Apagado</label>
+          <input type="time" class="form-control text-center fs-5 shadow-sm" 
+                 [value]="estadoMando.hora_fin" (change)="actualizarHorario('fin', $event)" 
+                 [disabled]="conexionPerdida || alarmaActiva">
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <div class="card shadow-sm mt-4 mx-auto" style="max-width: 800px;" [class.opacity-50]="conexionPerdida">
     <div class="card-body">
       <div class="d-flex justify-content-between align-items-center mb-3">

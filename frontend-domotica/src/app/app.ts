@@ -1,14 +1,16 @@
 import { Component, OnInit, AfterViewInit, ChangeDetectorRef, ViewChild, ElementRef } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { CommonModule } from '@angular/common';
 import { TelemetriaService } from './services/telemetria';
 import { Chart, registerables } from 'chart.js';
+import { io } from 'socket.io-client'; // <-- NUEVA ANTENA DE RADIO
 
 Chart.register(...registerables);
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet],
+  imports: [RouterOutlet, CommonModule],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })
@@ -18,12 +20,20 @@ export class App implements OnInit, AfterViewInit {
   esFormato24h: boolean = true; 
   historialCompleto: any[] = []; 
 
-  // Variables dinámicas del HMI SCADA
   alarmaActiva: boolean = false;
   mensajeAlarma: string = 'Sistema Energizado y en Línea';
-  
-  // Watchdog (Perro Guardián de Red)
   conexionPerdida: boolean = false;
+
+  // =========================================================
+  // ---> CEREBRO HMI BIDIRECCIONAL (WEBSOCKETS) <---
+  // =========================================================
+  socket: any;
+  estadoMando: any = { 
+    modo: 'manual', 
+    forzar_rele: true, 
+    hora_inicio: '', 
+    hora_fin: '' 
+  };
 
   @ViewChild('graficaConsumo') canvasLienzo!: ElementRef;
 
@@ -33,17 +43,42 @@ export class App implements OnInit, AfterViewInit {
   ) {}
 
   ngOnInit() {
+    this.conectarRadioSCADA(); // Iniciamos el túnel en tiempo real
     this.leerTablero();
-    
-    // Escaneo del estado del tablero cada 3 segundos
-    setInterval(() => {
-      this.leerTablero();
-    }, 3000);
+    setInterval(() => { this.leerTablero(); }, 3000);
   }
 
-  ngAfterViewInit() {
-    this.inicializarGrafica(); 
+  // Sincronización instantánea con Node.js
+  conectarRadioSCADA() {
+    // Nos conectamos al puerto 3000 del backend
+    this.socket = io('http://localhost:3000'); 
+
+    // Cuando Node.js nos mande una actualización, la reflejamos en los botones
+    this.socket.on('estado_mando', (estadoActualizado: any) => {
+      this.estadoMando = estadoActualizado;
+      this.cdr.detectChanges(); 
+    });
   }
+
+  // Funciones de Mando del Operador
+  cambiarModo(nuevoModo: string) {
+    this.estadoMando.modo = nuevoModo;
+    this.socket.emit('comando_operador', this.estadoMando);
+  }
+
+  enviarComandoManual(estado: boolean) {
+    this.estadoMando.forzar_rele = estado;
+    this.socket.emit('comando_operador', this.estadoMando);
+  }
+
+  actualizarHorario(tipo: string, event: any) {
+    if (tipo === 'inicio') this.estadoMando.hora_inicio = event.target.value;
+    if (tipo === 'fin') this.estadoMando.hora_fin = event.target.value;
+    this.socket.emit('comando_operador', this.estadoMando);
+  }
+  // =========================================================
+
+  ngAfterViewInit() { this.inicializarGrafica(); }
 
   inicializarGrafica() {
     if (this.canvasLienzo) {
@@ -56,25 +91,14 @@ export class App implements OnInit, AfterViewInit {
             data: [],
             borderColor: '#ffc107', 
             backgroundColor: 'rgba(255, 193, 7, 0.1)', 
-            borderWidth: 2,
-            fill: true,
-            tension: 0.4 
+            borderWidth: 2, fill: true, tension: 0.4 
           }]
         },
         options: {
-          responsive: true,
-          maintainAspectRatio: false, 
-          animation: false, 
+          responsive: true, maintainAspectRatio: false, animation: false, 
           scales: {
-            x: { 
-              display: true, 
-              grid: { color: 'rgba(255, 255, 255, 0.05)' },
-              ticks: { color: '#8892b0', maxTicksLimit: 8 }
-            },
-            y: {
-              grid: { color: 'rgba(255, 255, 255, 0.05)' },
-              ticks: { color: '#8892b0' }
-            }
+            x: { display: true, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#8892b0', maxTicksLimit: 8 } },
+            y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#8892b0' } }
           }
         }
       });
@@ -94,23 +118,18 @@ export class App implements OnInit, AfterViewInit {
           this.historialCompleto = datosOrdenados; 
           this.datoActual = datosOrdenados[datosOrdenados.length - 1]; 
           
-          // =================================================================
-          // WATCHDOG: MONITOREO DE ENLACE Y DIAGNÓSTICO DE PROTECCIONES
-          // =================================================================
           if (this.datoActual.timestamp) {
             const tiempoDelDato = new Date(this.datoActual.timestamp).getTime();
             const tiempoActual = new Date().getTime();
             const diferenciaSegundos = (tiempoActual - tiempoDelDato) / 1000;
 
-            // Tolerancia máxima industrial: 15 segundos de desfase
             if (diferenciaSegundos > 15) {
               this.conexionPerdida = true;
-              this.alarmaActiva = false; // Mitigamos falsos positivos de alarmas eléctricas
+              this.alarmaActiva = false;
               this.mensajeAlarma = '¡PÉRDIDA DE SEÑAL DE TELEMETRÍA!';
             } else {
               this.conexionPerdida = false;
               
-              // Decodificación de alarmas subordinadas al ESP32 (Single Source of Truth)
               if (this.datoActual.sensor_error === true || this.datoActual.sensor_error === 'true') {
                 this.alarmaActiva = true;
                 this.mensajeAlarma = '¡FALLA CRÍTICA: PÉRDIDA DE SEÑAL DEL SENSOR PZEM!';
@@ -123,76 +142,54 @@ export class App implements OnInit, AfterViewInit {
               }
             }
           }
-          // =================================================================
 
           if (this.graficaCarga) {
             const historialReciente = datosOrdenados.slice(-20);
-            
             this.graficaCarga.data.labels = historialReciente.map((d: any) => {
               if (d.timestamp) {
-                // El navegador formatea automáticamente de UTC a la hora local de Colombia
                 return new Date(d.timestamp).toLocaleTimeString('es-CO', { 
                   hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: !this.esFormato24h
                 });
               }
               return '';
             });
-
             this.graficaCarga.data.datasets[0].data = historialReciente.map((d: any) => d.power);
             
-            // Máquina de estados cromática para el trazo de la curva
             if (this.conexionPerdida) {
-              this.graficaCarga.data.datasets[0].borderColor = '#6c757d'; // Gris por desconexión
+              this.graficaCarga.data.datasets[0].borderColor = '#6c757d'; 
               this.graficaCarga.data.datasets[0].backgroundColor = 'rgba(108, 117, 125, 0.1)';
             } else {
-              this.graficaCarga.data.datasets[0].borderColor = this.alarmaActiva ? '#dc3545' : '#ffc107'; // Rojo (Falla) / Amarillo (OK)
+              this.graficaCarga.data.datasets[0].borderColor = this.alarmaActiva ? '#dc3545' : '#ffc107';
               this.graficaCarga.data.datasets[0].backgroundColor = this.alarmaActiva ? 'rgba(220, 53, 69, 0.1)' : 'rgba(255, 193, 7, 0.1)';
             }
-
             this.graficaCarga.update(); 
           }
-          
           this.cdr.detectChanges();
         }
       },
-      error: (error: any) => {
-        console.error('Falla crítica en la comunicación con la API Rest:', error);
-      }
+      error: (error: any) => { console.error('Falla en base de datos:', error); }
     });
   }
 
   descargarReporte() {
-    if (this.historialCompleto.length === 0) {
-      alert('Aún no hay datos registrados en el tablero.');
-      return;
-    }
-
-    let contenidoCSV = "sep=;\n"; 
-    contenidoCSV += "Fecha;Hora;Voltaje (V);Corriente (A);Potencia (W)\n";
-
+    if (this.historialCompleto.length === 0) return;
+    let contenidoCSV = "sep=;\nFecha;Hora;Voltaje (V);Corriente (A);Potencia (W)\n";
     const formatearDecimal = (valor: any): string => {
       if (valor === undefined || valor === null) return '0';
       return valor.toString().replace('.', ','); 
     };
-
     this.historialCompleto.forEach(dato => {
       if (dato.timestamp) {
         const fechaObj = new Date(dato.timestamp);
-        const fecha = fechaObj.toLocaleDateString('es-CO'); 
-        const hora = fechaObj.toLocaleTimeString('es-CO', { hour12: false }); 
-        
-        contenidoCSV += `${fecha};${hora};${formatearDecimal(dato.voltage)};${formatearDecimal(dato.current)};${formatearDecimal(dato.power)}\n`;
+        contenidoCSV += `${fechaObj.toLocaleDateString('es-CO')};${fechaObj.toLocaleTimeString('es-CO', { hour12: false })};${formatearDecimal(dato.voltage)};${formatearDecimal(dato.current)};${formatearDecimal(dato.power)}\n`;
       }
     });
-
     const blob = new Blob(["\ufeff" + contenidoCSV], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
-    
     const enlaceDescarga = document.createElement('a');
     enlaceDescarga.href = url;
     enlaceDescarga.download = `Reporte_Carga_${new Date().getTime()}.csv`; 
     enlaceDescarga.click();
-    
     window.URL.revokeObjectURL(url);
   }
 }

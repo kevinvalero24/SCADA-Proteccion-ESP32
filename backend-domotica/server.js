@@ -21,7 +21,7 @@ const io = new Server(server, {
 conectarDB();
 
 app.use(cors()); 
-app.use(express.json()); 
+app.use(express.json());
 
 // =========================================================================
 // ---> CEREBRO DE MANDO BIDIRECCIONAL (MEMORIA DEL PLC) <---
@@ -76,13 +76,13 @@ function evaluarControlHorario() {
   // Si la hora coincide con el inicio y el contactor está apagado -> ENCENDER
   if (horaActualStr === estadoMando.hora_inicio && estadoMando.forzar_rele === false) {
     estadoMando.forzar_rele = true;
-    console.log(`\n[Temporizador] ⏰ ¡Hora de INICIO alcanzada (${horaActualStr})! Energizando contactor.`);
+    console.log(`\n[Temporizador] ¡Hora de INICIO alcanzada (${horaActualStr})! Energizando contactor.`);
     io.emit('estado_mando', estadoMando); // Retransmitimos por radio a todos (ESP32 y HMI)
   }
   // Si la hora coincide con el fin y el contactor está encendido -> APAGAR
   else if (horaActualStr === estadoMando.hora_fin && estadoMando.forzar_rele === true) {
     estadoMando.forzar_rele = false;
-    console.log(`\n[Temporizador] ⏰ ¡Hora de FIN alcanzada (${horaActualStr})! Desenergizando contactor.`);
+    console.log(`\n[Temporizador] ¡Hora de FIN alcanzada (${horaActualStr})! Desenergizando contactor.`);
     io.emit('estado_mando', estadoMando); // Retransmitimos por radio a todos (ESP32 y HMI)
   }
 }
@@ -171,7 +171,7 @@ setInterval(consolidarYLimpiarDatos, 24 * 60 * 60 * 1000);
 // =========================================================================
 
 
-// 4. Rutas de la API
+// 4. Rutas de la API (AGRUPADAS Y CORREGIDAS)
 app.get('/api/estado', (req, res) => {
   res.json({
     mensaje: '¡Servidor del proyecto domótico funcionando al 100% con WebSockets!',
@@ -179,13 +179,15 @@ app.get('/api/estado', (req, res) => {
   });
 });
 
+app.use('/api/auth', require('./src/routes/authRoutes'));
 app.use('/api/nodos', require('./src/routes/nodoRoutes'));
 app.use('/api/telemetria', require('./src/routes/consumoRoutes'));
+app.use('/api/alertas', require('./src/routes/alertaRoutes')); // <-- CORREGIDA Y AGRUPADA
 
 // 5. Configuración del puerto
 const PORT = process.env.PORT || 3000;
 
-// 6. Encendido del servidor (¡AQUÍ CAMBIA APP POR SERVER!)
+// 6. Encendido del servidor 
 server.listen(PORT, () => {
   console.log(`\n Servidor y Radio SCADA corriendo exitosamente en el puerto: ${PORT}`);
   console.log(` Esperando el próximo paso: Conectar a MongoDB...`);

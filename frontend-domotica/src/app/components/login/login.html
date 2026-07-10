@@ -1,0 +1,40 @@
+<div class="d-flex justify-content-center align-items-center vh-100 bg-dark text-light" style="position: fixed; top: 0; left: 0; width: 100%; z-index: 9999;">
+  <div class="card bg-secondary shadow-lg border-0" style="width: 400px; border-radius: 8px; border: 1px solid #444 !important;">
+    
+    <div class="card-header bg-black text-center py-4 border-0" style="border-radius: 8px 8px 0 0; border-bottom: 3px solid #ffc107 !important;">
+      <h3 class="mb-0 fw-bold text-warning"><i class="fa-solid fa-bolt me-2"></i> HMI SCADA</h3>
+      <p class="text-muted small mb-0 mt-1 fw-bold">TERMINAL DE ACCESO RESTRINGIDO</p>
+    </div>
+    
+    <div class="card-body p-4 bg-dark">
+      <div *ngIf="mensajeError" class="alert alert-danger py-2 text-center fw-bold border-danger shadow-sm small">
+        <i class="fa-solid fa-triangle-exclamation me-1"></i> {{ mensajeError }}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label text-secondary fw-bold small">ID DE OPERADOR (CORREO)</label>
+        <div class="input-group shadow-sm">
+          <span class="input-group-text bg-black border-dark text-warning"><i class="fa-solid fa-user"></i></span>
+          <input type="email" class="form-control bg-secondary text-light border-dark shadow-none" [(ngModel)]="correo" placeholder="Ej: admin@ingenieria.com">
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <label class="form-label text-secondary fw-bold small">CLAVE DE SEGURIDAD</label>
+        <div class="input-group shadow-sm">
+          <span class="input-group-text bg-black border-dark text-warning"><i class="fa-solid fa-lock"></i></span>
+          <input type="password" class="form-control bg-secondary text-light border-dark shadow-none" [(ngModel)]="password" placeholder="••••••••" (keyup.enter)="iniciarSesion()">
+        </div>
+      </div>
+
+      <button class="btn btn-warning w-100 fw-bold py-2 shadow-sm" (click)="iniciarSesion()" [disabled]="cargando">
+        <span *ngIf="!cargando"><i class="fa-solid fa-right-to-bracket me-2"></i> DESBLOQUEAR TABLERO</span>
+        <span *ngIf="cargando"><i class="fa-solid fa-circle-notch fa-spin me-2"></i> ESTABLECIENDO ENLACE...</span>
+      </button>
+    </div>
+    
+    <div class="card-footer text-center bg-black border-0 py-3" style="border-radius: 0 0 8px 8px;">
+      <small class="text-secondary" style="font-size: 0.7rem;">SISTEMA DE GESTIÓN DE ENERGÍA V2.0</small>
+    </div>
+  </div>
+</div>

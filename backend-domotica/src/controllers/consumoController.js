@@ -2,6 +2,8 @@ const Consumo = require('../models/Consumo');
 const Nodo = require('../models/Nodo');
 const Alerta = require('../models/Alerta');
 
+// Memoria ultra-rápida (RAM) para las tarjetas en vivo del HMI
+const memoriaEnVivo = {};
 // Memoria volátil (RAM) para controlar el cronómetro de guardado por cada tablero físico
 const ultimosGuardados = {};
 
@@ -10,6 +12,9 @@ exports.registrarConsumo = async (req, res) => {
     try {
         const mac_address = req.body.mac_address;
         const ahora = Date.now();
+
+        // Guardamos la foto instantánea en la RAM para el HMI en vivo
+        memoriaEnVivo[req.body.circuit_id] = req.body;
         
         let alertaGenerada = null; // Variable para avisar si hubo peligro
         let forzarGuardado = false; // Bandera de seguridad (Registro por Evento)
@@ -44,7 +49,7 @@ exports.registrarConsumo = async (req, res) => {
         const ultimoTiempo = ultimosGuardados[mac_address] || 0;
         let lecturaGuardada = null;
 
-        // Si pasaron 60,000 milisegundos (1 min) o si la bandera de emergencia está activa
+        // Si pasaron 60,000 milisegundos (1 min) para no saturar MongoDB
         if ((ahora - ultimoTiempo >= 60000) || forzarGuardado) {
             
             // Guardamos la lectura normal en la base de datos
@@ -88,5 +93,107 @@ exports.obtenerHistorial = async (req, res) => {
             mensaje: 'Error al consultar el historial de telemetría',
             error: error.message
         });
+    }
+};
+
+// =========================================================================
+// ---> MODIFICADA: CÁLCULO DE EFICIENCIA ENERGÉTICA POR PERIODOS (EMS) <---
+// =========================================================================
+exports.obtenerMetricasConsumo = async (req, res) => {
+    try {
+        // 1. Buscamos la lectura más reciente del medidor para saber el acumulado actual
+        const ultimoDato = await Consumo.findOne().sort({ timestamp: -1 });
+
+        if (!ultimoDato) {
+            const ceroPeriodo = { energia_kwh: 0, costo_cop: 0 };
+            return res.status(200).json({ hoy: ceroPeriodo, semana: ceroPeriodo, mes: ceroPeriodo });
+        }
+
+        const circuitId = ultimoDato.circuit_id;
+        const energiaActualWh = ultimoDato.energy || 0;
+
+        // 2. Establecer las fronteras de tiempo
+        const ahora = new Date();
+
+        const inicioHoy = new Date(ahora);
+        inicioHoy.setHours(0, 0, 0, 0);
+
+        const inicioSemana = new Date(ahora);
+        const diaSemana = inicioSemana.getDay(); 
+        const distanciaALunes = diaSemana === 0 ? 6 : diaSemana - 1; 
+        inicioSemana.setDate(inicioSemana.getDate() - distanciaALunes);
+        inicioSemana.setHours(0, 0, 0, 0);
+
+        const inicioMes = new Date(ahora);
+        inicioMes.setDate(1);
+        inicioMes.setHours(0, 0, 0, 0);
+
+        // ---> LA CORRECCIÓN CLAVE: Convertimos a String ISO para que MongoDB lo pueda leer
+        const strHoy = inicioHoy.toISOString();
+        const strSemana = inicioSemana.toISOString();
+        const strMes = inicioMes.toISOString();
+
+        // 3. Consultar el primer dato almacenado usando el texto ISO
+        const primerDatoHoy = await Consumo.findOne({ circuit_id: circuitId, timestamp: { $gte: strHoy } }).sort({ timestamp: 1 });
+        const primerDatoSemana = await Consumo.findOne({ circuit_id: circuitId, timestamp: { $gte: strSemana } }).sort({ timestamp: 1 });
+        const primerDatoMes = await Consumo.findOne({ circuit_id: circuitId, timestamp: { $gte: strMes } }).sort({ timestamp: 1 });
+
+        // 4. Calcular el diferencial de energía consumida (Delta Wh)
+        const valorInicialHoy = primerDatoHoy ? primerDatoHoy.energy : energiaActualWh;
+        const valorInicialSemana = primerDatoSemana ? primerDatoSemana.energy : energiaActualWh;
+        const valorInicialMes = primerDatoMes ? primerDatoMes.energy : energiaActualWh;
+
+        const whHoy = energiaActualWh - valorInicialHoy;
+        const whSemana = energiaActualWh - valorInicialSemana;
+        const whMes = energiaActualWh - valorInicialMes;
+
+        // 5. Convertir a Kilovatios-hora (kWh)
+        const kwhHoy = Math.max(0, whHoy / 1000);
+        const kwhSemana = Math.max(0, whSemana / 1000);
+        const kwhMes = Math.max(0, whMes / 1000);
+
+        // Costo base de EMSA
+        const TARIFA_KWH_COP = 850; 
+
+        // 6. Retornar con 4 DECIMALES para cargas pequeñas
+        res.status(200).json({
+            hoy: {
+                energia_kwh: parseFloat(kwhHoy.toFixed(4)),
+                costo_cop: Math.round(kwhHoy * TARIFA_KWH_COP)
+            },
+            semana: {
+                energia_kwh: parseFloat(kwhSemana.toFixed(4)),
+                costo_cop: Math.round(kwhSemana * TARIFA_KWH_COP)
+            },
+            mes: {
+                energia_kwh: parseFloat(kwhMes.toFixed(4)),
+                costo_cop: Math.round(kwhMes * TARIFA_KWH_COP)
+            }
+        });
+
+    } catch (error) {
+        console.error('[Error de Métricas EMS]:', error);
+        res.status(500).json({ error: 'Falla al procesar el cálculo de consumo por ventanas de tiempo' });
+    }
+};
+
+// =========================================================================
+// ---> NUEVA FUNCIÓN: LEER MEMORIA ULTRA-RÁPIDA (RAM) PARA EL HMI EN VIVO <---
+// =========================================================================
+exports.obtenerEnVivo = (req, res) => {
+    try {
+        const { idCircuito } = req.params;
+        const datoRapido = memoriaEnVivo[idCircuito];
+
+        if (!datoRapido) {
+            // Si el servidor se acaba de reiniciar y el ESP32 no ha transmitido, mandamos null sin romper nada
+            return res.status(200).json(null);
+        }
+
+        // Retorna inmediatamente el dato alojado en la memoria RAM del servidor
+        res.status(200).json(datoRapido);
+    } catch (error) {
+        console.error('[Error al leer RAM]:', error);
+        res.status(500).json({ error: 'Falla crítica al leer el bus de tiempo real en RAM' });
     }
 };

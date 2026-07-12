@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const consumoController = require('../controllers/consumoController');
 
-
 // =========================================================================
 // 1. DESCARGA DE HISTÓRICOS EN CSV (SEMANAL O MENSUAL)
 // =========================================================================
@@ -63,8 +62,13 @@ router.get('/exportar-csv', async (req, res) => {
 // Ruta principal: POST /api/telemetria
 router.post('/', consumoController.registrarConsumo);
 
-// Ruta para LEER el historial de un circuito (La que usa Angular)
-router.get('/:idCircuito', consumoController.obtenerHistorial);
+// ---> Endpoint exclusivo para los indicadores de costo <---
+router.get('/metricas', consumoController.obtenerMetricasConsumo);
 
+// ---> NUEVA RUTA RÁPIDA: Lee directamente la memoria RAM del servidor <---
+router.get('/envivo/:idCircuito', consumoController.obtenerEnVivo);
+
+// Ruta para LEER el historial de un circuito (La que usa Angular para las gráficas)
+router.get('/:idCircuito', consumoController.obtenerHistorial);
 
 module.exports = router;

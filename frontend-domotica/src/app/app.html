@@ -40,7 +40,7 @@
     
     <div class="alert alert-warning mx-auto shadow-sm text-start mb-4" style="max-width: 800px; border-left: 5px solid #ffc107; background-color: #2c2205; color: #fff3cd;" [class.d-none]="!conexionPerdida">
       <h5 class="alert-heading fw-bold text-warning mb-2"><i class="fa-solid fa-triangle-exclamation me-2"></i> ¡Telemetría Desconectada!</h5>
-      <p class="mb-2 text-light"><strong>Esperando conexión del ESP32...</strong> El tablero HMI no recibe datos actualizados desde hace más de 15 segundos.</p>
+      <p class="mb-2 text-light"><strong>Esperando conexión del ESP32...</strong> El tablero HMI no recibe datos actualizados desde hace más de 1 minuto.</p>
     </div>
 
     <div *ngIf="alarmaActiva && !conexionPerdida" class="alert alert-danger text-center p-4 shadow-lg mx-auto mb-4" style="max-width: 800px; border: 2px solid #dc3545; background-color: #3b0c11; color: white;">
@@ -116,27 +116,103 @@
       </div>
     </div>
 
-    <div class="card bg-dark border-secondary shadow-sm mt-4 mx-auto" style="max-width: 400px;" 
+    <div class="card bg-dark border-secondary shadow-sm mt-4 mx-auto" style="max-width: 800px;" 
          [class.border-danger]="alarmaActiva && !conexionPerdida" 
          [class.bg-danger]="alarmaActiva && !conexionPerdida" 
          [class.text-white]="alarmaActiva && !conexionPerdida"
          [class.bg-secondary]="conexionPerdida"
          [class.opacity-50]="conexionPerdida">
       <div class="card-body">
-        <h5 class="card-title text-center text-light fw-bold small mb-3">ID TABLERO: {{ datoActual?.mac_address || 'Cargando...' }}</h5>
-        <div class="my-4 text-center">
-          <p class="mb-0 text-light small font-monospace">TENSIÓN DE RED</p>
-          <h2 class="fw-bold display-4 text-warning" [class.text-white]="alarmaActiva && !conexionPerdida">{{ datoActual?.voltage || '0' }} <span class="fs-4">V</span></h2>
+        <h5 class="card-title text-center text-light fw-bold small mb-4">ID TABLERO: {{ datoActual?.mac_address || 'Cargando...' }}</h5>
+        
+        <div class="row text-center align-items-center">
+          <div class="col-md-4 mb-3 mb-md-0">
+            <p class="mb-1 text-light small font-monospace fw-bold">TENSIÓN DE RED</p>
+            <div style="position: relative; height: 110px; width: 100%; margin: 0 auto;">
+              <canvas #graficaVoltaje></canvas>
+            </div>
+            <h3 class="fw-bold text-warning mt-2 mb-0" [class.text-white]="alarmaActiva && !conexionPerdida">
+              {{ datoActual?.voltage || '0' }} <span class="fs-5">V</span>
+            </h3>
+          </div>
+
+          <div class="col-md-4 mb-3 mb-md-0 border-start border-end border-secondary" [class.border-light]="alarmaActiva && !conexionPerdida">
+            <p class="mb-1 text-light small font-monospace fw-bold">CORRIENTE</p>
+            <div style="position: relative; height: 110px; width: 100%; margin: 0 auto;">
+              <canvas #graficaCorriente></canvas>
+            </div>
+            <h3 class="fw-bold text-info mt-2 mb-0" [class.text-white]="alarmaActiva && !conexionPerdida">
+              {{ datoActual?.current || '0' }} <span class="fs-5">A</span>
+            </h3>
+          </div>
+
+          <div class="col-md-4">
+            <p class="mb-1 text-light small font-monospace fw-bold">POTENCIA ACTIVA</p>
+            <div style="position: relative; height: 110px; width: 100%; margin: 0 auto;">
+              <canvas #graficaPotencia></canvas>
+            </div>
+            <h3 class="fw-bold text-success mt-2 mb-0" [class.text-white]="alarmaActiva && !conexionPerdida">
+              {{ datoActual?.power || '0' }} <span class="fs-5">W</span>
+            </h3>
+          </div>
         </div>
-        <div class="d-flex justify-content-around mt-4 border-top border-secondary pt-3" [class.border-light]="alarmaActiva && !conexionPerdida">
-          <div class="text-center">
-            <p class="mb-0 text-light small font-monospace">CORRIENTE</p>
-            <h4 class="fw-bold text-info" [class.text-white]="alarmaActiva && !conexionPerdida">{{ datoActual?.current || '0' }} A</h4>
+      </div>
+    </div>
+
+    <div class="card bg-dark border-secondary shadow-sm mt-4 mx-auto" style="max-width: 800px;" [class.opacity-50]="conexionPerdida">
+      <div class="card-header bg-black text-white border-bottom border-secondary d-flex justify-content-between align-items-center py-2">
+        <h5 class="mb-0 fw-bold small font-monospace">
+          <i class="fa-solid fa-leaf text-success me-2"></i> REPORTE DE GESTIÓN ENERGÉTICA (EMS)
+        </h5>
+        
+        <div class="d-flex align-items-center gap-2">
+          <label class="small font-monospace text-secondary mb-0 text-nowrap">RESOLUCIÓN:</label>
+          <select class="form-select form-select-sm bg-dark text-info border-secondary fw-bold py-0 px-2" 
+                  style="width: auto; height: 26px;" 
+                  [(ngModel)]="cantidadDecimales">
+            <option [ngValue]="2">2 Dec (Normal)</option>
+            <option [ngValue]="3">3 Dec (Preciso)</option>
+            <option [ngValue]="4">4 Dec (Auditoría)</option>
+          </select>
+        </div>
+      </div>
+      
+      <div class="card-body bg-dark">
+        <div class="row text-center">
+          
+          <div class="col-md-4 mb-3 mb-md-0">
+            <h6 class="text-light small font-monospace text-uppercase opacity-75">Consumo Hoy</h6>
+            <h2 class="fw-bold text-info my-2">
+              {{ metricasEnergia.hoy?.energia_kwh | number:'1.' + cantidadDecimales + '-' + cantidadDecimales }} 
+              <span class="fs-6">kWh</span>
+            </h2>
+            <div class="badge bg-black border border-secondary text-success fs-6 w-100 py-2">
+              $ {{ metricasEnergia.hoy?.costo_cop | number }} COP
+            </div>
           </div>
-          <div class="text-center">
-            <p class="mb-0 text-light small font-monospace">POTENCIA ACTIVA</p>
-            <h4 class="fw-bold text-success" [class.text-white]="alarmaActiva && !conexionPerdida">{{ datoActual?.power || '0' }} W</h4>
+
+          <div class="col-md-4 mb-3 mb-md-0 border-start border-end border-secondary">
+            <h6 class="text-light small font-monospace text-uppercase opacity-75">Esta Semana</h6>
+            <h2 class="fw-bold text-warning my-2">
+              {{ metricasEnergia.semana?.energia_kwh | number:'1.' + cantidadDecimales + '-' + cantidadDecimales }} 
+              <span class="fs-6">kWh</span>
+            </h2>
+            <div class="badge bg-black border border-secondary text-success fs-6 w-100 py-2">
+              $ {{ metricasEnergia.semana?.costo_cop | number }} COP
+            </div>
           </div>
+
+          <div class="col-md-4">
+            <h6 class="text-light small font-monospace text-uppercase opacity-75">Este Mes</h6>
+            <h2 class="fw-bold text-danger my-2">
+              {{ metricasEnergia.mes?.energia_kwh | number:'1.' + cantidadDecimales + '-' + cantidadDecimales }} 
+              <span class="fs-6">kWh</span>
+            </h2>
+            <div class="badge bg-black border border-secondary text-success fs-6 w-100 py-2">
+              $ {{ metricasEnergia.mes?.costo_cop | number }} COP
+            </div>
+          </div>
+
         </div>
       </div>
     </div>

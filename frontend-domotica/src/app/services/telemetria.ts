@@ -6,17 +6,28 @@ import { Observable } from 'rxjs';
   providedIn: 'root',
 })
 export class TelemetriaService {
-  // La ruta exacta de las borneras de tu Backend que arreglamos
-  private apiUrl = 'http://localhost:3000/api/telemetria/1';
+  // 1. Dejamos la ruta base limpia (La bornera principal del servidor)
+  private baseUrl = 'http://localhost:3000/api/telemetria';
 
   constructor(private http: HttpClient) {}
 
-  // Función para ir a leer el medidor
+  // 2. Función LENTA (Cada 1 min): Para leer la gráfica histórica en MongoDB
   obtenerDatosReales(): Observable<any> {
-    return this.http.get(this.apiUrl);
+    return this.http.get(`${this.baseUrl}/breaker_prueba_01`);
   }
-  // Retorna la URL directa para forzar la descarga nativa
+
+  // 3. ---> NUEVA FUNCIÓN RÁPIDA (Cada 5 seg): Para leer la RAM del servidor <---
+  obtenerDatosEnVivo(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/envivo/breaker_prueba_01`);
+  }
+
+  // 4. Llamado a la ruta de facturación y eficiencia
+  obtenerMetricas(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/metricas`);
+  }
+
+  // 5. Retorna la URL directa para forzar la descarga nativa (También usa la ruta base)
   exportarHistorialCSV(tipo: string): string {
-    return `http://localhost:3000/api/telemetria/exportar-csv?tipo=${tipo}`;
+    return `${this.baseUrl}/exportar-csv?tipo=${tipo}`;
   }
 }

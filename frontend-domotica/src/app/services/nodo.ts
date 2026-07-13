@@ -7,7 +7,7 @@ import { Observable } from 'rxjs';
 })
 export class NodoService {
   // Asegúrate de que el puerto apunte al de tu servidor backend en Node.js
-  private apiUrl = 'http://localhost:3000/api/nodos'; 
+  private apiUrl = 'http://192.168.1.4:3000/api/nodos'; 
 
   constructor(private http: HttpClient) {}
 

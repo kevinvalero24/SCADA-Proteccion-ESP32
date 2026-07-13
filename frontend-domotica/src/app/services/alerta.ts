@@ -7,7 +7,7 @@ import { Observable } from 'rxjs';
 })
 export class AlertaService {
   // Ruta que apunta a nuestro nuevo endpoint del log de eventos
-  private apiUrl = 'http://localhost:3000/api/alertas'; 
+  private apiUrl = 'http://192.168.1.4:3000/api/alertas'; 
 
   constructor(private http: HttpClient) {}
 

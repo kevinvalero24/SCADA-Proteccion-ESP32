@@ -29,6 +29,8 @@ Chart.register(...registerables);
   styleUrl: './app.css',
 })
 export class App implements OnInit, AfterViewInit, OnDestroy {
+  nombreCircuitoActual: string = 'OFICINA PRINCIPAL';
+
   datoActual: any = {};
   graficaCarga: any;
   esFormato24h: boolean = true;
@@ -36,9 +38,10 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
   historialCompleto: any[] = [];
 
   alarmaActiva: boolean = false;
-  mensajeAlarma: string = 'Sistema Energizado y en Línea';
+  mensajeAlarma: string = 'Circuito Energizado y en Línea';
   conexionPerdida: boolean = false;
   menuReporteAbierto: boolean = false;
+  menuMovilAbierto: boolean = false;
 
   listaNodos: any[] = [];
   mostrarPanelConfig: boolean = false;
@@ -51,9 +54,8 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
     mes: { energia_kwh: 0, costo_cop: 0 }
   };
 
-  // ---> SEGURIDAD: TIMEOUT DE INACTIVIDAD <---
   timeoutId: any;
-  tiempoInactividad: number = 10 * 60 * 1000; // 10 minutos en milisegundos
+  tiempoInactividad: number = 10 * 60 * 1000; 
 
   @ViewChild('graficaConsumo') canvasLienzo!: ElementRef;
   @ViewChild('graficaVoltaje') canvasVoltaje!: ElementRef;
@@ -64,9 +66,8 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
   gaugeCorriente: any;
   gaugePotencia: any;
 
-  // ---> VARIABLES PARA EL TEMPORIZADOR GUIADO <---
   mensajeHorario: string = '';
-  subModoHorario: string = 'rango'; // 'encendido', 'apagado' o 'rango'
+  subModoHorario: string = 'rango'; 
   
   socket: any;
   estadoMando: any = {
@@ -85,8 +86,23 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
   ) {}
 
   // =========================================================
-  // ---> SEGURIDAD Y CIERRE DE SESIÓN <---
+  // ---> MÓDULO DE ADMINISTRADOR Y MENÚ MÓVIL <---
   // =========================================================
+  toggleMenuMovil() {
+    this.menuMovilAbierto = !this.menuMovilAbierto;
+  }
+
+  editarNombreCircuito() {
+    const nuevoNombre = prompt('Ingrese el nuevo nombre para este circuito (Ej: Cuarto de Máquinas, Sala, Oficina):', this.nombreCircuitoActual);
+    if (nuevoNombre && nuevoNombre.trim() !== '') {
+      this.nombreCircuitoActual = nuevoNombre.trim();
+    }
+  }
+
+  agregarNuevoCircuito() {
+    alert('🔧 MODO EMPAREJAMIENTO ACTIVADO: \n\nPor favor conecte el nuevo módulo ESP32 a la corriente. La plataforma lo detectará automáticamente en la red y lo enlazará a su cuenta.');
+  }
+
   cerrarSesionTerminal() {
     this.limpiarEventosInactividad();
     this.authService.logout();
@@ -118,7 +134,7 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
 
   cerrarSesionPorInactividad() {
     if (this.authService.estaAutenticado()) {
-      alert('⏱️ La sesión ha caducado por inactividad. Por seguridad, debe ingresar nuevamente a su hogar domótico.');
+      alert('⏱️ La sesión ha caducado por inactividad. Por seguridad, debe ingresar nuevamente.');
       this.cerrarSesionTerminal();
     }
   }
@@ -147,15 +163,17 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
 
   descargarReporteMensual(tipo: string) {
     this.menuReporteAbierto = false; 
+    this.menuMovilAbierto = false; 
     const url = this.telemetriaService.exportarHistorialCSV(tipo);
     window.open(url, '_blank');
   }
 
   // =========================================================
-  // ---> COMUNICACIÓN WEBSOCKET Y COMANDOS DE DOMÓTICA <---
+  // ---> COMUNICACIÓN WEBSOCKET (CON IP FIJA PARA MÓVILES) <--
   // =========================================================
   conectarRadioSCADA() {
-    this.socket = io('http://localhost:3000');
+    // ---> CORREGIDO: Apunta directo a la IP de la máquina en la red local <---
+    this.socket = io('http://192.168.1.4:3000');
     this.socket.on('estado_mando', (estadoActualizado: any) => {
       this.estadoMando = estadoActualizado;
       this.cdr.detectChanges();
@@ -175,17 +193,14 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
     this.socket.emit('comando_operador', this.estadoMando);
   }
 
-  // ---> NUEVA LÓGICA: FILTROS DE SUB-MENÚ DE HORARIO <---
   cambiarSubModoHorario(subModo: string) {
     this.subModoHorario = subModo;
-    // Limpieza de seguridad: si cambiamos de menú, borramos las horas previas
     this.estadoMando.hora_inicio = '';
     this.estadoMando.hora_fin = '';
     this.mensajeHorario = '';
   }
 
   programarHorario() {
-    // Validaciones estrictas dependiendo de la pestaña en la que estemos
     if (this.subModoHorario === 'encendido' && !this.estadoMando.hora_inicio) {
       alert('Por favor seleccione la hora a la que desea encender el circuito.'); return;
     }
@@ -196,10 +211,8 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
       alert('Por favor seleccione la hora de encendido y apagado para fijar el rango.'); return;
     }
     
-    // Enviamos el dato limpio
     this.socket.emit('comando_operador', this.estadoMando);
     
-    // Generamos el mensaje al usuario
     if (this.subModoHorario === 'encendido') {
       this.mensajeHorario = `PROGRAMADO: Se encenderá automáticamente a las ${this.estadoMando.hora_inicio}`;
     } else if (this.subModoHorario === 'apagado') {
@@ -216,6 +229,7 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
     this.mostrarPanelConfig = !this.mostrarPanelConfig;
     if (this.mostrarPanelConfig) {
       this.mostrarPanelAlertas = false; 
+      this.menuMovilAbierto = false; 
       this.nodoService.obtenerNodos().subscribe({
         next: (res) => this.listaNodos = res,
         error: (err) => console.error('Error', err)
@@ -241,6 +255,7 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
     this.mostrarPanelAlertas = !this.mostrarPanelAlertas;
     if (this.mostrarPanelAlertas) {
       this.mostrarPanelConfig = false; 
+      this.menuMovilAbierto = false; 
       this.alertaService.obtenerHistorial().subscribe({
         next: (res) => this.historialAlertas = res,
         error: (err) => console.error('Error', err)
@@ -263,7 +278,7 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
         data: {
           labels: [],
           datasets: [{
-            label: 'Consumo de Potencia (W)',
+            label: 'Potencia Activa (W)',
             data: [],
             borderColor: '#ffc107',
             backgroundColor: 'rgba(255, 193, 7, 0.1)',
@@ -337,18 +352,18 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
             if (diferenciaSegundos > 20) {
               this.conexionPerdida = true;
               this.alarmaActiva = false;
-              this.mensajeAlarma = '¡SIN CONEXIÓN CON EL MEDIDOR!';
+              this.mensajeAlarma = '¡MÓDULO DE CIRCUITO DESCONECTADO!';
             } else {
               this.conexionPerdida = false;
               if (this.datoActual.sensor_error === true || this.datoActual.sensor_error === 'true') {
                 this.alarmaActiva = true;
-                this.mensajeAlarma = '¡ERROR EN EL SENSOR DEL CIRCUITO!';
+                this.mensajeAlarma = '¡ERROR DE LECTURA EN EL CIRCUITO!';
               } else if (this.datoActual.alarm_state === true || this.datoActual.alarm_state === 'true') {
                 this.alarmaActiva = true;
-                this.mensajeAlarma = '¡PROTECCIÓN DISPARADA! CIRCUITO APAGADO';
+                this.mensajeAlarma = '¡CIRCUITO APAGADO POR SOBRECARGA!';
               } else {
                 this.alarmaActiva = false;
-                this.mensajeAlarma = 'Hogar Inteligente en Línea';
+                this.mensajeAlarma = 'Circuito Normal y en Línea';
               }
             }
           }

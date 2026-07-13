@@ -2,13 +2,13 @@ import {
   Component,
   OnInit,
   AfterViewInit,
+  OnDestroy,
   ChangeDetectorRef,
   ViewChild,
   ElementRef,
 } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { CommonModule } from '@angular/common';
-// ---> 1. AGREGAMOS EL IMPORT DE FormsModule PARA [(ngModel)] <---
 import { FormsModule } from '@angular/forms'; 
 
 import { TelemetriaService } from './services/telemetria';
@@ -24,16 +24,14 @@ Chart.register(...registerables);
 @Component({
   selector: 'app-root',
   standalone: true,
-  // ---> 2. INCLUIMOS FormsModule EN LOS IMPORTS <---
   imports: [RouterOutlet, CommonModule, LoginComponent, FormsModule], 
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
-export class App implements OnInit, AfterViewInit {
+export class App implements OnInit, AfterViewInit, OnDestroy {
   datoActual: any = {};
   graficaCarga: any;
   esFormato24h: boolean = true;
-  // Control de resolución visual para el reporte de energía
   cantidadDecimales: number = 2;
   historialCompleto: any[] = [];
 
@@ -42,43 +40,34 @@ export class App implements OnInit, AfterViewInit {
   conexionPerdida: boolean = false;
   menuReporteAbierto: boolean = false;
 
-  // Variables para la gestión de tableros
   listaNodos: any[] = [];
   mostrarPanelConfig: boolean = false;
-
-  // Variables para el log de eventos (SOE)
   historialAlertas: any[] = [];
   mostrarPanelAlertas: boolean = false;
 
-  // ---> MODIFICADO: Estructura preparada para los 3 periodos de facturación <---
   metricasEnergia: any = { 
     hoy: { energia_kwh: 0, costo_cop: 0 },
     semana: { energia_kwh: 0, costo_cop: 0 },
     mes: { energia_kwh: 0, costo_cop: 0 }
   };
 
-  // =========================================================
-  // ---> REFERENCIAS VISUALES (CANVAS) <---
-  // =========================================================
+  // ---> SEGURIDAD: TIMEOUT DE INACTIVIDAD <---
+  timeoutId: any;
+  tiempoInactividad: number = 10 * 60 * 1000; // 10 minutos en milisegundos
+
   @ViewChild('graficaConsumo') canvasLienzo!: ElementRef;
-  
-  // Nuevos Canvas para los Velocímetros (Gauges)
   @ViewChild('graficaVoltaje') canvasVoltaje!: ElementRef;
   @ViewChild('graficaCorriente') canvasCorriente!: ElementRef;
   @ViewChild('graficaPotencia') canvasPotencia!: ElementRef;
 
-  // Variables para controlar los objetos Chart de las agujas
   gaugeVoltaje: any;
   gaugeCorriente: any;
   gaugePotencia: any;
 
-  toggleMenuReporte() {
-    this.menuReporteAbierto = !this.menuReporteAbierto;
-  }
+  // ---> VARIABLES PARA EL TEMPORIZADOR GUIADO <---
+  mensajeHorario: string = '';
+  subModoHorario: string = 'rango'; // 'encendido', 'apagado' o 'rango'
   
-  // =========================================================
-  // ---> CEREBRO HMI BIDIRECCIONAL (WEBSOCKETS) <---
-  // =========================================================
   socket: any;
   estadoMando: any = {
     modo: 'manual',
@@ -87,7 +76,6 @@ export class App implements OnInit, AfterViewInit {
     hora_fin: '',
   };
 
-  // ---> INYECCIÓN DE DEPENDENCIAS <---
   constructor(
     private telemetriaService: TelemetriaService,
     private cdr: ChangeDetectorRef,
@@ -96,9 +84,65 @@ export class App implements OnInit, AfterViewInit {
     private alertaService: AlertaService 
   ) {}
 
+  // =========================================================
+  // ---> SEGURIDAD Y CIERRE DE SESIÓN <---
+  // =========================================================
   cerrarSesionTerminal() {
+    this.limpiarEventosInactividad();
     this.authService.logout();
     window.location.reload();
+  }
+
+  resetTimer = () => {
+    if (this.timeoutId) clearTimeout(this.timeoutId);
+    if (this.authService.estaAutenticado()) {
+      this.timeoutId = setTimeout(() => this.cerrarSesionPorInactividad(), this.tiempoInactividad);
+    }
+  };
+
+  iniciarTemporizadorInactividad() {
+    this.resetTimer();
+    window.addEventListener('mousemove', this.resetTimer);
+    window.addEventListener('click', this.resetTimer);
+    window.addEventListener('keypress', this.resetTimer);
+    window.addEventListener('scroll', this.resetTimer);
+  }
+
+  limpiarEventosInactividad() {
+    if (this.timeoutId) clearTimeout(this.timeoutId);
+    window.removeEventListener('mousemove', this.resetTimer);
+    window.removeEventListener('click', this.resetTimer);
+    window.removeEventListener('keypress', this.resetTimer);
+    window.removeEventListener('scroll', this.resetTimer);
+  }
+
+  cerrarSesionPorInactividad() {
+    if (this.authService.estaAutenticado()) {
+      alert('⏱️ La sesión ha caducado por inactividad. Por seguridad, debe ingresar nuevamente a su hogar domótico.');
+      this.cerrarSesionTerminal();
+    }
+  }
+
+  // =========================================================
+  // ---> CICLO DE VIDA DE ANGULAR <---
+  // =========================================================
+  ngOnInit() {
+    this.conectarRadioSCADA(); 
+    this.leerTarjetasEnVivo();
+    this.leerGraficaHistorica();
+    
+    setInterval(() => { this.leerTarjetasEnVivo(); }, 5000);
+    setInterval(() => { this.leerGraficaHistorica(); }, 60000);
+
+    this.iniciarTemporizadorInactividad();
+  }
+
+  ngOnDestroy() {
+    this.limpiarEventosInactividad();
+  }
+
+  toggleMenuReporte() {
+    this.menuReporteAbierto = !this.menuReporteAbierto;
   }
 
   descargarReporteMensual(tipo: string) {
@@ -107,24 +151,9 @@ export class App implements OnInit, AfterViewInit {
     window.open(url, '_blank');
   }
 
-  ngOnInit() {
-    this.conectarRadioSCADA(); 
-    
-    // Disparo inicial de ambos motores al abrir la pantalla
-    this.leerTarjetasEnVivo();
-    this.leerGraficaHistorica();
-    
-    // RELOJ RÁPIDO: Lee la RAM cada 5 segundos para tarjetas y alarmas
-    setInterval(() => {
-      this.leerTarjetasEnVivo();
-    }, 5000);
-
-    // RELOJ LENTO: Lee MongoDB cada 60 segundos para la gráfica y facturación
-    setInterval(() => {
-      this.leerGraficaHistorica();
-    }, 60000);
-  }
-
+  // =========================================================
+  // ---> COMUNICACIÓN WEBSOCKET Y COMANDOS DE DOMÓTICA <---
+  // =========================================================
   conectarRadioSCADA() {
     this.socket = io('http://localhost:3000');
     this.socket.on('estado_mando', (estadoActualizado: any) => {
@@ -135,6 +164,9 @@ export class App implements OnInit, AfterViewInit {
 
   cambiarModo(nuevoModo: string) {
     this.estadoMando.modo = nuevoModo;
+    if (nuevoModo === 'manual') {
+      this.mensajeHorario = ''; 
+    }
     this.socket.emit('comando_operador', this.estadoMando);
   }
 
@@ -143,23 +175,50 @@ export class App implements OnInit, AfterViewInit {
     this.socket.emit('comando_operador', this.estadoMando);
   }
 
-  actualizarHorario(tipo: string, event: any) {
-    if (tipo === 'inicio') this.estadoMando.hora_inicio = event.target.value;
-    if (tipo === 'fin') this.estadoMando.hora_fin = event.target.value;
-    this.socket.emit('comando_operador', this.estadoMando);
+  // ---> NUEVA LÓGICA: FILTROS DE SUB-MENÚ DE HORARIO <---
+  cambiarSubModoHorario(subModo: string) {
+    this.subModoHorario = subModo;
+    // Limpieza de seguridad: si cambiamos de menú, borramos las horas previas
+    this.estadoMando.hora_inicio = '';
+    this.estadoMando.hora_fin = '';
+    this.mensajeHorario = '';
   }
-  
+
+  programarHorario() {
+    // Validaciones estrictas dependiendo de la pestaña en la que estemos
+    if (this.subModoHorario === 'encendido' && !this.estadoMando.hora_inicio) {
+      alert('Por favor seleccione la hora a la que desea encender el circuito.'); return;
+    }
+    if (this.subModoHorario === 'apagado' && !this.estadoMando.hora_fin) {
+      alert('Por favor seleccione la hora a la que desea apagar el circuito.'); return;
+    }
+    if (this.subModoHorario === 'rango' && (!this.estadoMando.hora_inicio || !this.estadoMando.hora_fin)) {
+      alert('Por favor seleccione la hora de encendido y apagado para fijar el rango.'); return;
+    }
+    
+    // Enviamos el dato limpio
+    this.socket.emit('comando_operador', this.estadoMando);
+    
+    // Generamos el mensaje al usuario
+    if (this.subModoHorario === 'encendido') {
+      this.mensajeHorario = `PROGRAMADO: Se encenderá automáticamente a las ${this.estadoMando.hora_inicio}`;
+    } else if (this.subModoHorario === 'apagado') {
+      this.mensajeHorario = `PROGRAMADO: Se apagará automáticamente a las ${this.estadoMando.hora_fin}`;
+    } else {
+      this.mensajeHorario = `PROGRAMADO: ON a las ${this.estadoMando.hora_inicio} | OFF a las ${this.estadoMando.hora_fin}`;
+    }
+  }
+
   // =========================================================
-  // ---> MÓDULO DE GESTIÓN DE NODOS Y CIRCUITOS <---
+  // ---> MÓDULOS DE CONFIGURACIÓN Y ALERTAS <---
   // =========================================================
-  
   abrirPanelConfiguracion() {
     this.mostrarPanelConfig = !this.mostrarPanelConfig;
     if (this.mostrarPanelConfig) {
       this.mostrarPanelAlertas = false; 
       this.nodoService.obtenerNodos().subscribe({
         next: (res) => this.listaNodos = res,
-        error: (err) => console.error('Error al cargar la topología', err)
+        error: (err) => console.error('Error', err)
       });
     }
   }
@@ -173,33 +232,28 @@ export class App implements OnInit, AfterViewInit {
       },
       error: (err) => {
         console.error(err);
-        alert('Falla al reconfigurar el umbral.');
+        alert('Falla al reconfigurar.');
       }
     });
   }
 
-  // =========================================================
-  // ---> MÓDULO DE HISTORIAL DE ALARMAS (SOE) <---
-  // =========================================================
-  
   abrirPanelAlertas() {
     this.mostrarPanelAlertas = !this.mostrarPanelAlertas;
     if (this.mostrarPanelAlertas) {
       this.mostrarPanelConfig = false; 
       this.alertaService.obtenerHistorial().subscribe({
         next: (res) => this.historialAlertas = res,
-        error: (err) => console.error('Error al cargar el Sequence of Events', err)
+        error: (err) => console.error('Error', err)
       });
     }
   }
 
   // =========================================================
-  // ---> GESTIÓN VISUAL Y GRÁFICAS <---
+  // ---> GRÁFICAS Y VELOCÍMETROS <---
   // =========================================================
-
   ngAfterViewInit() {
-    this.inicializarGrafica(); // Curva asíncrona histórica
-    this.inicializarVelocimetros(); // Gauges analógicos en tiempo real
+    this.inicializarGrafica(); 
+    this.inicializarVelocimetros(); 
   }
 
   inicializarGrafica() {
@@ -208,28 +262,22 @@ export class App implements OnInit, AfterViewInit {
         type: 'line',
         data: {
           labels: [],
-          datasets: [
-            {
-              label: 'Consumo de Potencia (W)',
-              data: [],
-              borderColor: '#ffc107',
-              backgroundColor: 'rgba(255, 193, 7, 0.1)',
-              borderWidth: 2,
-              fill: true,
-              tension: 0.4,
-            },
-          ],
+          datasets: [{
+            label: 'Consumo de Potencia (W)',
+            data: [],
+            borderColor: '#ffc107',
+            backgroundColor: 'rgba(255, 193, 7, 0.1)',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.4,
+          }],
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
           animation: false,
           scales: {
-            x: {
-              display: true,
-              grid: { color: 'rgba(255, 255, 255, 0.05)' },
-              ticks: { color: '#8892b0', maxTicksLimit: 8 },
-            },
+            x: { display: true, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#8892b0', maxTicksLimit: 8 } },
             y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#8892b0' } },
           },
         },
@@ -239,35 +287,22 @@ export class App implements OnInit, AfterViewInit {
 
   inicializarVelocimetros() {
     const opcionesComunes = (color: string) => ({
-      responsive: true,
-      maintainAspectRatio: false,
-      circumference: 180, 
-      rotation: 270,      
-      plugins: { legend: { display: false }, tooltip: { enabled: false } },
-      cutout: '75%'       
+      responsive: true, maintainAspectRatio: false, circumference: 180, rotation: 270,      
+      plugins: { legend: { display: false }, tooltip: { enabled: false } }, cutout: '75%'       
     });
-
     if (this.canvasVoltaje) {
       this.gaugeVoltaje = new Chart(this.canvasVoltaje.nativeElement, {
-        type: 'doughnut',
-        data: { datasets: [{ data: [0, 150], backgroundColor: ['#ffc107', 'rgba(255,255,255,0.05)'], borderWidth: 0 }] },
-        options: opcionesComunes('#ffc107')
+        type: 'doughnut', data: { datasets: [{ data: [0, 150], backgroundColor: ['#ffc107', 'rgba(255,255,255,0.05)'], borderWidth: 0 }] }, options: opcionesComunes('#ffc107')
       });
     }
-
     if (this.canvasCorriente) {
       this.gaugeCorriente = new Chart(this.canvasCorriente.nativeElement, {
-        type: 'doughnut',
-        data: { datasets: [{ data: [0, 5], backgroundColor: ['#0dcaf0', 'rgba(255,255,255,0.05)'], borderWidth: 0 }] },
-        options: opcionesComunes('#0dcaf0')
+        type: 'doughnut', data: { datasets: [{ data: [0, 5], backgroundColor: ['#0dcaf0', 'rgba(255,255,255,0.05)'], borderWidth: 0 }] }, options: opcionesComunes('#0dcaf0')
       });
     }
-
     if (this.canvasPotencia) {
       this.gaugePotencia = new Chart(this.canvasPotencia.nativeElement, {
-        type: 'doughnut',
-        data: { datasets: [{ data: [0, 1200], backgroundColor: ['#198754', 'rgba(255,255,255,0.05)'], borderWidth: 0 }] },
-        options: opcionesComunes('#198754')
+        type: 'doughnut', data: { datasets: [{ data: [0, 1200], backgroundColor: ['#198754', 'rgba(255,255,255,0.05)'], borderWidth: 0 }] }, options: opcionesComunes('#198754')
       });
     }
   }
@@ -285,15 +320,11 @@ export class App implements OnInit, AfterViewInit {
     this.leerGraficaHistorica(); 
   }
 
-  // =========================================================
-  // ---> MOTOR RÁPIDO: TARJETAS VISUALES Y ALARMAS (5 SEG) <---
-  // =========================================================
   leerTarjetasEnVivo() {
     this.telemetriaService.obtenerDatosEnVivo().subscribe({
       next: (datoRapido: any) => {
         if (datoRapido) {
           this.datoActual = datoRapido;
-
           this.actualizarArcoGauge(this.gaugeVoltaje, Number(this.datoActual.voltage || 0), 150);
           this.actualizarArcoGauge(this.gaugeCorriente, Number(this.datoActual.current || 0), 5); 
           this.actualizarArcoGauge(this.gaugePotencia, Number(this.datoActual.power || 0), 1200); 
@@ -306,39 +337,34 @@ export class App implements OnInit, AfterViewInit {
             if (diferenciaSegundos > 20) {
               this.conexionPerdida = true;
               this.alarmaActiva = false;
-              this.mensajeAlarma = '¡PÉRDIDA DE SEÑAL DE TELEMETRÍA!';
+              this.mensajeAlarma = '¡SIN CONEXIÓN CON EL MEDIDOR!';
             } else {
               this.conexionPerdida = false;
-
               if (this.datoActual.sensor_error === true || this.datoActual.sensor_error === 'true') {
                 this.alarmaActiva = true;
-                this.mensajeAlarma = '¡FALLA CRÍTICA: PÉRDIDA DE SEÑAL DEL SENSOR PZEM!';
+                this.mensajeAlarma = '¡ERROR EN EL SENSOR DEL CIRCUITO!';
               } else if (this.datoActual.alarm_state === true || this.datoActual.alarm_state === 'true') {
                 this.alarmaActiva = true;
-                this.mensajeAlarma = '¡FALLA: PROTECCIÓN DISPARADA DESDE EL HARDWARE!';
+                this.mensajeAlarma = '¡PROTECCIÓN DISPARADA! CIRCUITO APAGADO';
               } else {
                 this.alarmaActiva = false;
-                this.mensajeAlarma = 'Sistema Energizado y en Línea';
+                this.mensajeAlarma = 'Hogar Inteligente en Línea';
               }
             }
           }
           this.cdr.detectChanges();
         }
       },
-      error: (err: any) => console.error('Falla al leer RAM:', err)
+      error: (err: any) => console.error('Falla RAM:', err)
     });
   }
 
-  // =========================================================
-  // ---> MOTOR LENTO: GRÁFICA Y COSTOS (60 SEG) <---
-  // =========================================================
   leerGraficaHistorica() {
     this.telemetriaService.obtenerDatosReales().subscribe({
       next: (datos: any) => {
         if (datos && datos.length > 0) {
           const datosOrdenados = datos.sort((a: any, b: any) => (a._id > b._id ? 1 : -1));
           this.historialCompleto = datosOrdenados;
-
           if (this.graficaCarga) {
             const historialReciente = datosOrdenados.slice(-20);
             this.graficaCarga.data.labels = historialReciente.map((d: any) => {
@@ -350,7 +376,6 @@ export class App implements OnInit, AfterViewInit {
               return '';
             });
             this.graficaCarga.data.datasets[0].data = historialReciente.map((d: any) => d.power);
-
             if (this.conexionPerdida) {
               this.graficaCarga.data.datasets[0].borderColor = '#6c757d';
               this.graficaCarga.data.datasets[0].backgroundColor = 'rgba(108, 117, 125, 0.1)';
@@ -363,7 +388,7 @@ export class App implements OnInit, AfterViewInit {
           this.cdr.detectChanges();
         }
       },
-      error: (error: any) => console.error('Falla en base de datos:', error),
+      error: (error: any) => console.error('Falla BD:', error),
     });
 
     this.telemetriaService.obtenerMetricas().subscribe({
@@ -371,7 +396,7 @@ export class App implements OnInit, AfterViewInit {
         this.metricasEnergia = res;
         this.cdr.detectChanges();
       },
-      error: (err: any) => console.error('Error al cargar métricas de eficiencia', err)
+      error: (err: any) => console.error('Error Métricas', err)
     });
   }
 }

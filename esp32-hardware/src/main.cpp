@@ -21,9 +21,19 @@ const int RELE_PIN = 4;
 SocketIOclient socketIO;
 
 // --- VARIABLES GLOBALES DE ESTADO ---
-bool ordenEncendidoHMI = true;
+bool ordenEncendidoHMI = true;  // Estado deseado del relé
 unsigned long ultimoReporte = 0;
-bool fallaDeRed = false; // Memoria del estado de la red electrica
+bool fallaDeRed = false;        // Memoria del estado de protección
+
+// ---> VARIABLES DE DOMÓTICA (RELOJ INTELIGENTE) <---
+String modoActual = "manual";   // Puede ser "manual" o "horario"
+String horaInicio = "";         // "HH:MM" (ej. "18:30")
+String horaFin = "";            // "HH:MM" (ej. "06:00")
+bool accionHorariaEjecutada = false; // Evita mandar la orden miles de veces en el mismo minuto
+
+// Configuración de Zona Horaria (Colombia es UTC-5)
+const long gmtOffset_sec = -5 * 3600; 
+const int daylightOffset_sec = 0;
 
 // =================================================================
 // FUNCION MAESTRA DE ENCLAVAMIENTO (CERO RETARDO)
@@ -36,14 +46,14 @@ void actualizarContactor()
   }
   else
   {
-    // RED ESTABLE: Obedece al HMI de Angular
+    // RED ESTABLE: Obedece a la lógica interna (Manual o Automática)
     if (ordenEncendidoHMI)
     {
-      digitalWrite(RELE_PIN, HIGH); // HMI ON: Contactor en reposo NC (ON)
+      digitalWrite(RELE_PIN, HIGH); // ON: Contactor energizado o en reposo (según su cableado)
     }
     else
     {
-      digitalWrite(RELE_PIN, LOW); // HMI OFF: Contactor energizado y abierto (OFF)
+      digitalWrite(RELE_PIN, LOW);  // OFF: Abre el circuito
     }
   }
 }
@@ -66,26 +76,88 @@ void socketIOEvent(socketIOmessageType_t type, uint8_t *payload, size_t length)
     DynamicJsonDocument doc(1024);
     DeserializationError error = deserializeJson(doc, payload);
 
-    if (error)
-      return;
+    if (error) return;
 
     const char *evento = doc[0];
     if (String(evento) == "estado_mando")
     {
-      bool comandoRele = doc[1]["forzar_rele"];
+      // 1. Extraemos el modo de operación
+      if (doc[1].containsKey("modo")) {
+          modoActual = doc[1]["modo"].as<String>();
+      }
 
-      if (ordenEncendidoHMI != comandoRele)
-      {
-        ordenEncendidoHMI = comandoRele;
-        Serial.print("[HMI] ORDEN MANUAL RECIBIDA: ");
-        Serial.println(ordenEncendidoHMI ? "ENCENDER" : "APAGAR");
+      Serial.print("[HMI] MODO CAMBIADO A: ");
+      Serial.println(modoActual);
 
-        // ¡LA SOLUCION! Disparamos el hardware en el mismo milisegundo que llega la orden
-        actualizarContactor();
+      // 2. Lógica MODO MANUAL
+      if (modoActual == "manual") {
+          bool comandoRele = doc[1]["forzar_rele"];
+          if (ordenEncendidoHMI != comandoRele) {
+              ordenEncendidoHMI = comandoRele;
+              Serial.print("[HMI] ORDEN MANUAL: ");
+              Serial.println(ordenEncendidoHMI ? "PRENDER" : "APAGAR");
+              actualizarContactor();
+          }
+      }
+      // 3. Lógica MODO HORARIO (Captura de horas)
+      else if (modoActual == "horario") {
+          if (doc[1].containsKey("hora_inicio")) {
+              horaInicio = doc[1]["hora_inicio"].as<String>();
+          }
+          if (doc[1].containsKey("hora_fin")) {
+              horaFin = doc[1]["hora_fin"].as<String>();
+          }
+          
+          Serial.print("[HMI] PROGRAMACIÓN RECIBIDA -> ON: [");
+          Serial.print(horaInicio);
+          Serial.print("] | OFF: [");
+          Serial.print(horaFin);
+          Serial.println("]");
+          
+          // Al recibir nueva programación, habilitamos la ejecución
+          accionHorariaEjecutada = false; 
       }
     }
     break;
   }
+}
+
+// =================================================================
+// FUNCIÓN PARA REVISAR EL RELOJ Y ACTUAR
+// =================================================================
+void verificarRelojDomotico() {
+    // Si no estamos en modo horario, salimos rápido
+    if (modoActual != "horario") return;
+
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) {
+        return; // Si no hay reloj, no hacemos nada
+    }
+
+    // Formatear la hora actual en texto "HH:MM" para compararla fácil
+    char horaActualChar[6];
+    strftime(horaActualChar, sizeof(horaActualChar), "%H:%M", &timeinfo);
+    String horaActual = String(horaActualChar);
+
+    // Evita actuar si ya hicimos el cambio en este mismo minuto
+    static String ultimoMinutoEvaluado = "";
+    if (horaActual == ultimoMinutoEvaluado) return;
+
+    // --- EVALUAR ENCENDIDO ---
+    if (horaInicio != "" && horaActual == horaInicio && !ordenEncendidoHMI) {
+        Serial.println("[TEMPORIZADOR] ¡Es la hora de ENCENDER!");
+        ordenEncendidoHMI = true;
+        actualizarContactor();
+        ultimoMinutoEvaluado = horaActual;
+    }
+    
+    // --- EVALUAR APAGADO ---
+    if (horaFin != "" && horaActual == horaFin && ordenEncendidoHMI) {
+        Serial.println("[TEMPORIZADOR] ¡Es la hora de APAGAR!");
+        ordenEncendidoHMI = false;
+        actualizarContactor();
+        ultimoMinutoEvaluado = horaActual;
+    }
 }
 
 void setup()
@@ -99,7 +171,7 @@ void setup()
   WiFi.disconnect();
   delay(100);
 
-  Serial.println("\n--- Iniciando Sistema SCADA Bidireccional ---");
+  Serial.println("\n--- Iniciando Sistema Domótico ---");
   WiFi.begin(ssid, password);
 
   int intentosWiFi = 0;
@@ -113,7 +185,9 @@ void setup()
   if (WiFi.status() == WL_CONNECTED)
   {
     Serial.println("\nRed conectada exitosamente!");
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    
+    // Configuramos el reloj con el offset de Colombia (-5 horas)
+    configTime(gmtOffset_sec, daylightOffset_sec, "pool.ntp.org", "time.nist.gov");
 
     int intentosNTP = 0;
     struct tm timeinfo;
@@ -122,7 +196,7 @@ void setup()
       delay(500);
       intentosNTP++;
     }
-    Serial.println("Reloj del sistema sincronizado en UTC.");
+    Serial.println("Reloj sincronizado (Hora Local Colombia).");
 
     socketIO.begin(ip_de_tu_pc, 3000, "/socket.io/?EIO=4");
     socketIO.onEvent(socketIOEvent);
@@ -132,6 +206,9 @@ void setup()
 void loop()
 {
   socketIO.loop();
+  
+  // El microcontrolador vigila el reloj en cada ciclo
+  verificarRelojDomotico();
 
   if (millis() - ultimoReporte >= 5000)
   {
@@ -161,7 +238,7 @@ void loop()
         fallaDeRed = true;
         estadoAlarma = true;
         sensorError = false;
-        Serial.println(">>> ¡FALLA DE RED DETECTADA! (Bloqueo de seguridad) <<<");
+        Serial.println(">>> ¡FALLA DE RED DETECTADA! (Bloqueo) <<<");
       }
       else
       {
@@ -171,7 +248,6 @@ void loop()
       }
     }
 
-    // Revalidamos la posicion del rele cada 5 segundos por seguridad
     actualizarContactor();
 
     if (WiFi.status() == WL_CONNECTED)
@@ -182,7 +258,9 @@ void loop()
       if (getLocalTime(&timeinfo))
       {
         char estampaTiempo[30];
-        strftime(estampaTiempo, sizeof(estampaTiempo), "%Y-%m-%dT%H:%M:%S.000Z", &timeinfo);
+        // Aquí pasamos la estampa a formato UTC puro para MongoDB
+      // Pasamos la estampa con el ajuste horario explícito de Colombia (-05:00)
+        strftime(estampaTiempo, sizeof(estampaTiempo), "%Y-%m-%dT%H:%M:%S.000-05:00", &timeinfo);
         estampaString = String(estampaTiempo);
       }
       else

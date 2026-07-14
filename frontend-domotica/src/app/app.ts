@@ -173,7 +173,7 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
   // =========================================================
   conectarRadioSCADA() {
     // ---> CORREGIDO: Apunta directo a la IP de la máquina en la red local <---
-    this.socket = io('http://192.168.1.4:3000');
+    this.socket = io('https://scada-proteccion-esp32.onrender.com');
     this.socket.on('estado_mando', (estadoActualizado: any) => {
       this.estadoMando = estadoActualizado;
       this.cdr.detectChanges();

@@ -347,9 +347,19 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
           if (this.datoActual.timestamp) {
             const tiempoDelDato = new Date(this.datoActual.timestamp).getTime();
             const tiempoActual = new Date().getTime();
-            const diferenciaSegundos = (tiempoActual - tiempoDelDato) / 1000;
 
-            if (diferenciaSegundos > 20) {
+            // ---> INICIO DE LA CORRECCIÓN DE ZONA HORARIA <---
+            let diferenciaSegundos = Math.abs(tiempoActual - tiempoDelDato) / 1000;
+            
+            diferenciaSegundos = diferenciaSegundos % 1800;
+            
+            if (diferenciaSegundos > 900) {
+              diferenciaSegundos = 1800 - diferenciaSegundos;
+            }
+            // ---> FIN DE LA CORRECCIÓN <---
+
+            // Subimos la tolerancia a 25 segundos para asegurar la conexión móvil
+            if (diferenciaSegundos > 25) { 
               this.conexionPerdida = true;
               this.alarmaActiva = false;
               this.mensajeAlarma = '¡MÓDULO DE CIRCUITO DESCONECTADO!';

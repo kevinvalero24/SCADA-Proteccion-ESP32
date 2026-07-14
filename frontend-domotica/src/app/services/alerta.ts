@@ -6,8 +6,8 @@ import { Observable } from 'rxjs';
   providedIn: 'root'
 })
 export class AlertaService {
-  // Ruta que apunta a nuestro nuevo endpoint del log de eventos
-  private apiUrl = 'http://192.168.1.4:3000/api/alertas'; 
+  // Ruta que apunta a nuestro nuevo endpoint del log de eventos en la nube (Render)
+  private apiUrl = 'https://scada-proteccion-esp32.onrender.com/api/alertas'; 
 
   constructor(private http: HttpClient) {}
 

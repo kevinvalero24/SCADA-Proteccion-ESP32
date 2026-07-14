@@ -7,7 +7,8 @@ import { tap } from 'rxjs/operators';
   providedIn: 'root'
 })
 export class AuthService {
-  private apiUrl = 'http://192.168.1.4:3000/api/auth';
+  // Apuntando el sistema de login al servidor seguro en la nube
+  private apiUrl = 'https://scada-proteccion-esp32.onrender.com/api/auth';
 
   constructor(private http: HttpClient) {}
 

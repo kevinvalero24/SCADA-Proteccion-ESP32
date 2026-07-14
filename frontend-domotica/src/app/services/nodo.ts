@@ -6,8 +6,8 @@ import { Observable } from 'rxjs';
   providedIn: 'root'
 })
 export class NodoService {
-  // Asegúrate de que el puerto apunte al de tu servidor backend en Node.js
-  private apiUrl = 'http://192.168.1.4:3000/api/nodos'; 
+  // Apuntando el control de circuitos y límites de potencia al servidor en la nube
+  private apiUrl = 'https://scada-proteccion-esp32.onrender.com/api/nodos'; 
 
   constructor(private http: HttpClient) {}
 

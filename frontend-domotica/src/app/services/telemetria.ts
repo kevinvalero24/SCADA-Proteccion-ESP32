@@ -6,8 +6,8 @@ import { Observable } from 'rxjs';
   providedIn: 'root',
 })
 export class TelemetriaService {
-  // 1. Dejamos la ruta base limpia (La bornera principal del servidor)
-  private baseUrl = 'http://192.168.1.4:3000/api/telemetria';
+  // 1. Dejamos la ruta base limpia apuntando al servidor en la NUBE (Render)
+  private baseUrl = 'https://scada-proteccion-esp32.onrender.com/api/telemetria';
 
   constructor(private http: HttpClient) {}
 

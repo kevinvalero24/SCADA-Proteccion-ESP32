@@ -10,9 +10,8 @@
 const char *ssid = "MOVISTAR - ESPERANZA";
 const char *password = "V1d4L3$18";
 
-// --- IP DEL SERVIDOR BACKEND ---
-String ip_de_tu_pc = "192.168.1.4";
-String url_telemetria = "http://" + ip_de_tu_pc + ":3000/api/telemetria";
+// --- URL DEL SERVIDOR EN LA NUBE (RENDER) ---
+String url_telemetria = "https://scada-proteccion-esp32.onrender.com/api/telemetria";
 
 // --- CONFIGURACION DE HARDWARE ---
 PZEM004Tv30 pzem(Serial2, 16, 17);
@@ -66,10 +65,10 @@ void socketIOEvent(socketIOmessageType_t type, uint8_t *payload, size_t length)
   switch (type)
   {
   case sIOtype_DISCONNECT:
-    Serial.println("[Radio] OFFLINE: Perdida de senal con el SCADA.");
+    Serial.println("[Radio] OFFLINE: Perdida de senal con la nube (Render).");
     break;
   case sIOtype_CONNECT:
-    Serial.println("[Radio] ONLINE: Conectado al SCADA exitosamente.");
+    Serial.println("[Radio] ONLINE: Conectado al servidor en la nube exitosamente.");
     socketIO.send(sIOtype_CONNECT, "/");
     break;
   case sIOtype_EVENT:
@@ -171,7 +170,7 @@ void setup()
   WiFi.disconnect();
   delay(100);
 
-  Serial.println("\n--- Iniciando Sistema Domótico ---");
+  Serial.println("\n--- Iniciando Sistema Domótico (Modo Nube) ---");
   WiFi.begin(ssid, password);
 
   int intentosWiFi = 0;
@@ -198,7 +197,8 @@ void setup()
     }
     Serial.println("Reloj sincronizado (Hora Local Colombia).");
 
-    socketIO.begin(ip_de_tu_pc, 3000, "/socket.io/?EIO=4");
+    // Conexión segura a Render (Puerto 443 con SSL)
+    socketIO.beginSSL("scada-proteccion-esp32.onrender.com", 443, "/socket.io/?EIO=4");
     socketIO.onEvent(socketIOEvent);
   }
 }
@@ -259,7 +259,7 @@ void loop()
       {
         char estampaTiempo[30];
         // Aquí pasamos la estampa a formato UTC puro para MongoDB
-      // Pasamos la estampa con el ajuste horario explícito de Colombia (-05:00)
+        // Pasamos la estampa con el ajuste horario explícito de Colombia (-05:00)
         strftime(estampaTiempo, sizeof(estampaTiempo), "%Y-%m-%dT%H:%M:%S.000-05:00", &timeinfo);
         estampaString = String(estampaTiempo);
       }
@@ -283,9 +283,15 @@ void loop()
                          ", \"timestamp\": \"" + estampaString + "\"}";
 
       int codigoRespuesta = http.POST(datosJSON);
-      if (codigoRespuesta < 0)
+      if (codigoRespuesta > 0)
       {
-        Serial.print("Error POST: ");
+        Serial.print("[Telemetría] OK. Código HTTP: ");
+        Serial.println(codigoRespuesta);
+        Serial.println(" -> ¡El dato llegó a la nube de Render con éxito!");
+      }
+      else
+      {
+        Serial.print("[Telemetría] Error POST: ");
         Serial.println(codigoRespuesta);
       }
       http.end();

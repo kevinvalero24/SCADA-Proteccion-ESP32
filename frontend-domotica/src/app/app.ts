@@ -359,7 +359,7 @@ export class App implements OnInit, AfterViewInit, OnDestroy {
             // ---> FIN DE LA CORRECCIÓN <---
 
             // Subimos la tolerancia a 25 segundos para asegurar la conexión móvil
-            if (diferenciaSegundos > 25) { 
+            if (diferenciaSegundos > 300) { 
               this.conexionPerdida = true;
               this.alarmaActiva = false;
               this.mensajeAlarma = '¡MÓDULO DE CIRCUITO DESCONECTADO!';
